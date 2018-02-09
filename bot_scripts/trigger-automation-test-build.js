@@ -33,11 +33,31 @@ function registerForRelevantCardEvents (robot) {
   robot.on(['project_card.created', 'project_card.moved'], context => processChangedProjectCard(robot, context))
 }
 
+function getRepoFullnameFromContentUrl (contentUrl) {
+  const prefix = 'https://api.github.com/repos/'
+  if (!contentUrl.startsWith(prefix)) {
+    return null
+  }
+
+  const components = contentUrl.replace(prefix, '').split('/')
+
+  return {owner: components[0], repo: components[1]}
+}
+
 async function processChangedProjectCard (robot, context) {
   const { github, payload } = context
-  const repo = payload.repository
-  if (!repo) {
-    robot.log.debug(`trigger-automation-test-build - Repository info is not present in payload, ignoring`)
+  const repoFullName = getRepoFullnameFromContentUrl(payload.project_card.content_url)
+  if (!repoFullName) {
+    return
+  }
+
+  // HACK: probot-config needs to access the repo to get the config,
+  // but that isn't provided in the project_card.* payloads,
+  // so we fetch it ourselves and add it to the context
+  try {
+    context.repo = await github.repos.get(repoFullName)
+  } catch (error) {
+    robot.log.warn(`trigger-automation-test-build - Error while fetching repo`, repoFullName, error)
     return
   }
 
@@ -56,8 +76,8 @@ async function processChangedProjectCard (robot, context) {
   const projectBoardName = projectBoardConfig['name']
   const testColumnName = projectBoardConfig['test-column-name']
 
-  if (repo.full_name !== automatedTestsConfig['repo-full-name']) {
-    robot.log.trace(`trigger-automation-test-build - Pull request project doesn't match watched repo, exiting`, repo.full_name, automatedTestsConfig['repo-full-name'])
+  if (repoFullName !== automatedTestsConfig['repo-full-name']) {
+    robot.log.trace(`trigger-automation-test-build - Pull request project doesn't match watched repo, exiting`, repoFullName, automatedTestsConfig['repo-full-name'])
     return
   }
 
